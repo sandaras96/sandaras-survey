@@ -2,8 +2,10 @@
 //  NICU BABY IN INCUBATOR  -  flat vector illustration builder
 //  Adobe Illustrator ExtendScript   (File > Scripts > Other Script...)
 //
-//  STAGE 1 of 4 :  document + full layer stack + background + monitors
-//                  + incubator.  Layers for later stages are created empty.
+//  BUILT SO FAR :  document + full layer stack, background, monitors,
+//                  incubator (stage 1) and organs overlay + labels (stage 4).
+//  STILL TO COME :  baby (stage 2), tubes / wires / tapes (stage 3).
+//                  Their layers are already created, empty.
 //
 //  Everything is drawn from scratch as bezier paths (no tracing, no images).
 //  Design coordinates are 1920 x 1080 px, origin top-left, y pointing down;
@@ -13,7 +15,7 @@
 
 (function () {
 
-    var STAGE = 1;          // which build stage this file contains
+    var STAGES_BUILT = '1 (background, monitors, incubator) + 4 (organs, labels)';
     var W = 1920, H = 1080; // artboard size in px
 
     // ------------------------------------------------------------------------
@@ -60,7 +62,30 @@
         phInLightL:  '#F5C39B',
         phRingR:     '#CFC7E3',
         phInR:       '#F6CFA6',
-        phInLightR:  '#F8D8B3'
+        phInLightR:  '#F8D8B3',
+        // organs
+        brainGlow:   '#EE7680',
+        brainBack:   '#E9777F',
+        brainFront:  '#F28C9A',
+        brainFoldB:  '#D35E6C',
+        brainFold:   '#D2697A',
+        lungGlow:    '#EE8590',
+        lung:        '#EE8E9B',
+        lungLight:   '#F09AA6',
+        lungDark:    '#A35E7B',
+        airway:      '#F4BCC3',
+        bronchus:    '#F7CBD2',
+        bronchiole:  '#F9D9DE',
+        gutGlow:     '#EF8792',
+        colon:       '#EE8F9B',
+        colonLine:   '#DC7183',
+        smallInt:    '#E3576C',
+        smallIntFold:'#C33D55',
+        // labels
+        titleBox:    '#564395',
+        labelBox:    '#FFFFFF',
+        labelText:   '#3A3150',
+        leader:      '#FFFFFF'
     };
 
     // ------------------------------------------------------------------------
@@ -108,6 +133,12 @@
     }
     function MIRX(axisX) { return [-1, 0, 0, 1, 2 * axisX, 0]; }   // mirror left/right
     function MOVE(dx, dy) { return [1, 0, 0, 1, dx, dy]; }
+    function SCALE(k, cx, cy) { return [k, 0, 0, k, cx - k * cx, cy - k * cy]; }
+    function mul(A, B) {   // A after B
+        return [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1],
+                A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3],
+                A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+    }
     function apply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
 
     function r2(n) { return Math.round(n * 100) / 100; }
@@ -153,6 +184,37 @@
         var s = 'M' + r2(pts[0][0]) + ' ' + r2(pts[0][1]);
         for (var i = 1; i < pts.length; i++) s += ' L' + r2(pts[i][0]) + ' ' + r2(pts[i][1]);
         return closed ? s + ' Z' : s;
+    }
+
+    // smooth curve through points (Catmull-Rom converted to cubic beziers)
+    function smooth(pts, closed) {
+        var n = pts.length, s = 'M' + r2(pts[0][0]) + ' ' + r2(pts[0][1]), i;
+        var segs = closed ? n : n - 1;
+        for (i = 0; i < segs; i++) {
+            var p0 = pts[closed ? (i - 1 + n) % n : Math.max(i - 1, 0)];
+            var p1 = pts[i], p2 = pts[(i + 1) % n];
+            var p3 = pts[closed ? (i + 2) % n : Math.min(i + 2, n - 1)];
+            s += ' C' + r2(p1[0] + (p2[0] - p0[0]) / 6) + ' ' + r2(p1[1] + (p2[1] - p0[1]) / 6) + ' ' +
+                r2(p2[0] - (p3[0] - p1[0]) / 6) + ' ' + r2(p2[1] - (p3[1] - p1[1]) / 6) + ' ' + r2(p2[0]) + ' ' + r2(p2[1]);
+        }
+        return closed ? s + ' Z' : s;
+    }
+
+    // lumpy edge (brain lobes, gut haustra): from 'from' through pts, each segment
+    // bulges outward by h * its length. Outward = correct for clockwise outlines;
+    // pass a negative h when travelling counter-clockwise.
+    function lumps(from, pts, h) {
+        var s = '', a = from, i;
+        for (i = 0; i < pts.length; i++) {
+            var b = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], nx = dy * h, ny = -dx * h;
+            s += ' C' + r2(a[0] + dx * 0.15 + nx) + ' ' + r2(a[1] + dy * 0.15 + ny) + ' ' +
+                r2(b[0] - dx * 0.15 + nx) + ' ' + r2(b[1] - dy * 0.15 + ny) + ' ' + r2(b[0]) + ' ' + r2(b[1]);
+            a = b;
+        }
+        return s;
+    }
+    function cloud(pts, h) {
+        return 'M' + r2(pts[0][0]) + ' ' + r2(pts[0][1]) + lumps(pts[0], pts.slice(1).concat([pts[0]]), h) + ' Z';
     }
 
     // ------------------------------------------------------------------------
@@ -314,6 +376,15 @@
     }
     for (i = 0; i < BODY_SUBLAYERS.length; i++) BODY[BODY_SUBLAYERS[i]].zOrder(ZOrderMethod.BRINGTOFRONT);
 
+    function sublayers(parent, names) {
+        var out = {}, j;
+        for (j = 0; j < names.length; j++) { out[names[j]] = parent.layers.add(); out[names[j]].name = names[j]; }
+        for (j = 0; j < names.length; j++) out[names[j]].zOrder(ZOrderMethod.BRINGTOFRONT);
+        return out;
+    }
+    var ORG = sublayers(LY.Organs_Overlay, ['Brain', 'Lungs', 'Intestines']);
+    var LBL = sublayers(LY.Labels_Text, ['Title_Label', 'Label_Neurological', 'Label_Respiratory', 'Label_Gut']);
+
     // ========================================================================
     //  STAGE 1  -  BACKGROUND WALL + GRID
     // ========================================================================
@@ -460,6 +531,239 @@
     }
 
     // ========================================================================
+    //  STAGE 4  -  ORGANS OVERLAY  (hidden by default)
+    //  Organ shapes are authored in the coordinates of the close-up reference
+    //  (image 2) and mapped into this scene:  scene = 0.71 * closeUp + (254, 191)
+    // ========================================================================
+    var OV = [0.71, 0, 0, 0.71, 254, 191];
+
+    function organ(container, name, d, st, extra) {
+        var o = {}, k;
+        for (k in st) o[k] = st[k];
+        o.m = extra ? mul(OV, extra) : OV;
+        if (o.w) o.w = o.w * OV[0];
+        return shape(container, name, d, o);
+    }
+
+    function strokes(container, prefix, list, st) {
+        var g = group(container, prefix + 's'), j;
+        for (j = 0; j < list.length; j++) organ(g, prefix + '_' + pad2(j + 1), smooth(list[j], false), st);
+        return g;
+    }
+
+    // ---------------------------------------------------------------- brain
+    function buildBrain(L) {
+        var hull = [[905, 40], [955, 22], [1005, 25], [1040, 42], [1075, 62], [1112, 90], [1132, 130], [1133, 185], [1118, 228],
+            [1085, 262], [1040, 277], [995, 268], [955, 245], [925, 220], [890, 195], [868, 150], [866, 100], [880, 62]];
+        organ(L, 'Brain_Glow_Outer', smooth(hull, true), { f: COL.brainGlow, o: 18 }, SCALE(1.07, 1000, 150));
+        organ(L, 'Brain_Glow_Inner', smooth(hull, true), { f: COL.brainGlow, o: 28 }, SCALE(0.98, 1000, 150));
+
+        organ(L, 'Brain_Back_Hemisphere', cloud([[908, 50], [950, 33], [995, 36], [1032, 55], [1048, 110], [1020, 190],
+            [965, 228], [935, 218], [905, 188], [880, 148], [878, 98]], 0.22), { f: COL.brainBack });
+        strokes(L, 'Brain_Back_Fold', [
+            [[933, 50], [943, 57], [950, 67], [947, 74]],
+            [[910, 80], [923, 77], [937, 81]],
+            [[893, 93], [897, 107], [907, 113], [923, 110]],
+            [[880, 143], [897, 150], [913, 153]],
+            [[980, 58], [990, 47], [999, 43]],
+            [[897, 118], [900, 130], [910, 134]],
+            [[960, 46], [966, 56], [976, 60]],
+            [[886, 120], [890, 128], [889, 136]],
+            [[903, 165], [912, 170], [918, 180]],
+            [[1010, 45], [1018, 50], [1022, 58]]
+        ], { s: COL.brainFoldB, w: 2.9 });
+
+        organ(L, 'Brain_Front_Hemisphere', cloud([[985, 70], [1022, 56], [1066, 78], [1098, 100], [1117, 135], [1117, 180],
+            [1103, 220], [1075, 253], [1035, 262], [997, 250], [958, 226], [930, 197], [914, 160], [918, 118], [944, 90]], 0.2),
+            { f: COL.brainFront });
+        strokes(L, 'Brain_Fold', [
+            [[953, 97], [967, 93], [997, 92]],
+            [[972, 93], [975, 103], [973, 111]],
+            [[942, 125], [960, 120], [987, 128], [1003, 120]],
+            [[993, 93], [1007, 110], [1008, 127], [1002, 150], [997, 160]],
+            [[1027, 75], [1037, 73], [1047, 83]],
+            [[1050, 85], [1037, 97], [1023, 110], [1013, 123]],
+            [[1067, 110], [1053, 117], [1037, 127], [1027, 143], [1017, 153]],
+            [[1090, 117], [1073, 123], [1063, 137], [1050, 153], [1047, 167], [1037, 173]],
+            [[1103, 140], [1090, 143], [1083, 153], [1080, 170], [1070, 177]],
+            [[1090, 183], [1083, 180], [1067, 183], [1060, 197], [1057, 210]],
+            [[1007, 167], [1020, 170], [1037, 173], [1050, 177]],
+            [[950, 147], [963, 153], [977, 150], [990, 157], [1000, 167]],
+            [[918, 160], [937, 157], [950, 162], [960, 173]],
+            [[937, 183], [950, 183], [960, 193], [970, 183], [983, 177]],
+            [[960, 197], [977, 197], [990, 203], [997, 217]],
+            [[990, 210], [1007, 217], [1017, 227], [1023, 243]],
+            [[1023, 197], [1037, 203], [1050, 210], [1053, 223]],
+            [[1037, 227], [1050, 231], [1060, 243]],
+            [[1077, 210], [1083, 223], [1087, 237]],
+            [[977, 223], [983, 237], [993, 243]],
+            [[933, 137], [943, 137], [950, 143]],
+            [[925, 110], [935, 106], [944, 112]],
+            [[1012, 72], [1006, 82], [1010, 92]],
+            [[1080, 92], [1072, 100], [1074, 110]],
+            [[1110, 160], [1100, 166], [1097, 178]],
+            [[1105, 195], [1095, 200], [1094, 212]],
+            [[1063, 240], [1070, 247], [1072, 255]],
+            [[1012, 236], [1004, 240], [1003, 248]],
+            [[944, 205], [953, 208], [958, 218]],
+            [[1040, 140], [1030, 150], [1032, 160]],
+            [[1060, 160], [1068, 165], [1066, 175]]
+        ], { s: COL.brainFold, w: 2.9 });
+    }
+
+    // ---------------------------------------------------------------- lungs
+    var LUNG_L = 'M912 401 C926 399 938 402 940 414 C942 450 941 500 941 538 C941 547 935 552 926 551 ' +
+        'C905 549 885 550 872 552 C864 553 859 546 860 536 C860 495 866 452 884 424 C891 412 900 403 912 401 Z';
+
+    function lung(L, side, shade) {
+        var P = 'Lung_' + side, g = group(L, P), mir = (side === 'R') ? MIRX(953) : null, j;
+        function M(m) { return mir ? (m ? mul(mir, m) : mir) : m; }
+        organ(g, P + '_Glow', LUNG_L, { f: COL.lungGlow, o: 22 }, M(SCALE(1.09, 901, 477)));
+        organ(g, P + '_Fill', LUNG_L, { f: COL.lung }, M(null));
+        organ(g, P + '_Inner_Light', LUNG_L, { f: COL.lungLight }, M(SCALE(0.86, 903, 479)));
+        var dg = group(g, P + '_Bronchial_Shading');
+        for (j = 0; j < shade.length; j++)
+            organ(dg, P + '_Shade_' + pad2(j + 1), shade[j][0], { s: COL.lungDark, w: shade[j][1], o: 80 }, M(null));
+        var b = group(g, P + '_Bronchi');
+        var branches = [
+            'M926 466 C919 458 913 448 910 436 C908 428 907 420 906 412',
+            'M912 452 C905 446 899 440 896 430',
+            'M919 468 C908 467 896 466 884 470',
+            'M912 488 C903 494 893 497 880 500',
+            'M911 505 C900 512 890 516 875 524',
+            'M912 495 C918 502 922 512 924 528',
+            'M910 520 C905 530 898 538 892 545'
+        ];
+        for (j = 0; j < branches.length; j++) organ(b, P + '_Bronchus_' + pad2(j + 1), branches[j], { s: COL.bronchus, w: 2.6 }, M(null));
+        var twigs = [
+            'M906 425 C900 419 897 414 894 410', 'M908 430 C914 424 918 418 920 410', 'M896 432 C889 430 882 432 876 436',
+            'M884 470 C877 466 872 464 866 466', 'M880 500 C874 504 869 510 866 518', 'M875 524 C870 530 868 538 867 545',
+            'M924 528 C928 535 930 542 933 547', 'M893 481 C886 484 878 486 870 486', 'M918 480 C925 482 930 488 934 496',
+            'M902 455 C895 456 888 452 882 446', 'M896 430 C894 422 895 415 899 408', 'M884 470 C880 476 874 480 868 480',
+            'M890 498 C888 506 884 512 878 515', 'M901 512 C901 522 898 530 896 538', 'M911 470 C924 474 932 470 937 462',
+            'M924 512 C930 512 935 516 937 522', 'M918 440 C924 438 930 432 934 424'
+        ];
+        for (j = 0; j < twigs.length; j++) organ(b, P + '_Bronchiole_' + pad2(j + 1), twigs[j], { s: COL.bronchiole, w: 1.4 }, M(null));
+        return g;
+    }
+
+    function buildLungs(L) {
+        // shading = [path, width]; drawn under the light bronchi
+        lung(L, 'L', [
+            ['M912 492 C911 506 910 520 909 534', 11],
+            ['M912 490 C903 495 892 498 876 500', 9],
+            ['M911 506 C900 512 890 517 876 523', 8],
+            ['M905 500 C900 508 897 516 892 524', 7],
+            ['M918 462 C912 458 908 452 906 444', 7],
+            ['M909 434 C908 426 907 420 906 414', 5],
+            ['M913 497 C918 504 921 512 922 522', 5],
+            ['M882 485 C880 486 878 486 876 486', 6]
+        ]);
+        // right lung = mirrored left lung with its own shading (given on the left side, then mirrored)
+        lung(L, 'R', [
+            ['M926 466 C918 458 913 448 910 436 C908 428 907 420 906 414', 10],
+            ['M912 452 C905 446 899 440 897 432', 7],
+            ['M918 484 C910 484 898 484 888 486', 6],
+            ['M912 492 C911 506 910 520 909 532', 6],
+            ['M912 520 C907 526 904 530 903 534', 6],
+            ['M930 488 C932 490 933 492 933 494', 6],
+            ['M879 531 C878 532 877 532 876 532', 7]
+        ]);
+        var a = group(L, 'Airway');
+        organ(a, 'Trachea', 'M953 378 L953 449', { s: COL.airway, w: 8 });
+        organ(a, 'Main_Bronchus_L', 'M953 447 C947 456 934 462 926 466 C919 470 914 478 912 490 L910 538', { s: COL.airway, w: 5 });
+        organ(a, 'Main_Bronchus_R', 'M953 447 C947 456 934 462 926 466 C919 470 914 478 912 490 L910 538', { s: COL.airway, w: 5 }, MIRX(953));
+    }
+
+    // ---------------------------------------------------------------- intestines
+    function buildIntestines(L) {
+        var glow = [[872, 609], [960, 605], [1042, 611], [1045, 680], [1043, 740], [1022, 752], [992, 752], [982, 790], [962, 808],
+            [943, 802], [937, 762], [918, 770], [899, 767], [867, 744], [865, 670]];
+        organ(L, 'Gut_Glow_Outer', smooth(glow, true), { f: COL.gutGlow, o: 16 }, SCALE(1.05, 955, 700));
+        organ(L, 'Gut_Glow_Inner', smooth(glow, true), { f: COL.gutGlow, o: 24 }, SCALE(0.99, 955, 700));
+
+        // large intestine: ascending (left), transverse (top), descending (right),
+        // sigmoid along the bottom and rectum down the middle
+        var colon = 'M907 760 C903 760 898 755 893 750 C888 745 881 738 877 730' +
+            lumps([877, 730], [[873, 716], [872, 701], [873, 686], [872, 671], [873, 656], [875, 641], [882, 628], [896, 620]], 0.5) +
+            lumps([896, 620], [[913, 618], [930, 619], [947, 618], [964, 619], [981, 618], [998, 619], [1015, 619], [1027, 624]], 0.4) +
+            lumps([1027, 624], [[1032, 638], [1032, 654], [1033, 670], [1032, 686], [1033, 702], [1032, 718], [1028, 732], [1018, 740]], 0.5) +
+            lumps([1018, 740], [[1002, 742], [986, 741]], 0.4) +
+            lumps([986, 741], [[978, 752], [974, 766], [970, 780], [964, 791]], 0.45) +
+            ' C961 797 954 799 951 794' +
+            lumps([951, 794], [[948, 781], [946, 767], [945, 753], [945, 742]], 0.45) +
+            ' L945 728 L912 728 C907 734 908 748 909 754 C909 757 908 759 907 760 Z';
+        organ(L, 'Colon_Large_Intestine', colon, { f: COL.colon });
+
+        organ(L, 'Small_Intestine', cloud([[906, 656], [921, 651], [936, 654], [951, 651], [966, 654], [981, 651], [1000, 654],
+            [1002, 672], [1001, 690], [998, 706], [975, 712], [950, 716], [946, 730], [932, 738], [915, 736], [906, 724],
+            [905, 706], [905, 688], [905, 671]], 0.2), { f: COL.smallInt });
+        strokes(L, 'Small_Intestine_Fold', [
+            [[909, 660], [911, 672], [917, 678], [922, 668]],
+            [[946, 659], [956, 667], [961, 680], [957, 690]],
+            [[968, 657], [977, 665], [980, 679]],
+            [[986, 659], [987, 668], [994, 670]],
+            [[908, 697], [925, 690], [942, 693], [958, 697], [974, 694], [996, 688]],
+            [[922, 706], [935, 711], [945, 705], [952, 712], [968, 712]],
+            [[908, 717], [920, 721], [934, 720]],
+            [[932, 662], [928, 676], [934, 684]]
+        ], { s: COL.smallIntFold, w: 2.6 });
+
+        // sigmoid loop crosses in front of the small intestine
+        organ(L, 'Colon_Sigmoid', 'M1018 748 L1016 696' + lumps([1016, 696], [[998, 707], [978, 708], [960, 709]], -0.15) +
+            ' C951 709 945 716 944 726 L943 748 Z', { f: COL.colon });
+        organ(L, 'Colon_Taenia_Line', smooth([[904, 750], [896, 737], [894, 702], [894, 652], [900, 637], [950, 635], [1005, 635],
+            [1014, 643], [1015, 690], [1014, 716], [1007, 725], [985, 727], [967, 729], [959, 738], [958, 772]], false),
+            { s: COL.colonLine, w: 2 });
+    }
+
+    // ========================================================================
+    //  STAGE 4  -  LABELS
+    // ========================================================================
+    function findFont(names) {
+        for (var j = 0; j < names.length; j++) {
+            try { return app.textFonts.getByName(names[j]); } catch (e) {}
+        }
+        return null;   // falls back to Illustrator's default font
+    }
+    var FONT = findFont(['Gilroy-SemiBold', 'Montserrat-SemiBold', 'Nunito-Bold', 'Quicksand-Bold',
+        'Poppins-Medium', 'ArialRoundedMTBold', 'Arial-BoldMT']);
+
+    // white/purple box sized to its text. opt: x (left edge, or right edge if opt.right), y (top), h, pad, size, text, fill
+    function boxLabel(container, prefix, str, opt) {
+        var t = container.textFrames.add();
+        t.contents = str;
+        t.name = prefix + '_Text';
+        var ca = t.textRange.characterAttributes;
+        ca.size = opt.size;
+        ca.fillColor = rgb(opt.text);
+        if (FONT) ca.textFont = FONT;
+        var w = t.width + 2 * opt.pad, left = opt.right ? opt.x - w : opt.x;
+        shape(container, prefix + '_Box', rect(left, opt.y, w, opt.h), { f: opt.fill });
+        t.position = [X(left + opt.pad), Y(opt.y + (opt.h - t.height) / 2)];
+        t.zOrder(ZOrderMethod.BRINGTOFRONT);
+        return t;
+    }
+
+    function buildLabels() {
+        boxLabel(LBL.Title_Label, 'Title', 'Oxygen Therapy / Mechanical Ventilation',
+            { x: 35, y: 37, h: 59, pad: 38, size: 34, text: COL.white, fill: COL.titleBox });
+
+        var lw = { s: COL.leader, w: 2.5 };
+        shape(LBL.Label_Neurological, 'Neuro_Leader', poly([[1096, 299], [1031, 312]]), lw);
+        boxLabel(LBL.Label_Neurological, 'Neuro', 'Neurological Issues',
+            { x: 1095, y: 261, h: 43, pad: 26, size: 26, text: COL.labelText, fill: COL.labelBox });
+
+        shape(LBL.Label_Respiratory, 'Respiratory_Leader', poly([[1096, 592], [966, 552]]), lw);
+        boxLabel(LBL.Label_Respiratory, 'Respiratory', 'Respiratory Issues',
+            { x: 1095, y: 591, h: 42, pad: 26, size: 26, text: COL.labelText, fill: COL.labelBox });
+
+        shape(LBL.Label_Gut, 'Gut_Leader', poly([[716, 629], [875, 655]]), lw);
+        boxLabel(LBL.Label_Gut, 'Gut', 'Gut Issues',
+            { x: 717, y: 591, h: 42, pad: 26, size: 26, text: COL.labelText, fill: COL.labelBox, right: true });
+    }
+
+    // ========================================================================
     //  BUILD
     // ========================================================================
     buildBackground(LY.BG_Wall_Grid);
@@ -469,12 +773,23 @@
     buildIncubatorGlass(LY.Incubator_Glass);
     buildPortholes(LY.Incubator_Portholes);
 
-    // later stages: baby (2), tubes/wires + tapes (3), organs overlay + labels (4)
+    buildBrain(ORG.Brain);
+    buildLungs(ORG.Lungs);
+    buildIntestines(ORG.Intestines);
+    buildLabels();
 
-    LY.Organs_Overlay.visible = false;   // hidden by default (set after drawing)
+    // still to come: baby (stage 2), tubes / wires + tapes (stage 3)
+
+    // hidden by default (layers must be visible while drawing into them)
+    LY.Organs_Overlay.visible = false;
+    LBL.Label_Neurological.visible = false;
+    LBL.Label_Respiratory.visible = false;
+    LBL.Label_Gut.visible = false;
 
     try { doc.selection = null; } catch (e2) {}
     try { app.redraw(); } catch (e3) {}
-    alert('NICU illustration - stage ' + STAGE + ' built.\n' + LAYER_ORDER.length + ' layers created.');
+    alert('NICU illustration built: stages ' + STAGES_BUILT + '.\n' +
+        'Organs_Overlay and the three organ labels are hidden - turn them on in the Layers panel.' +
+        (FONT ? '' : '\nLabel font not found - default font used.'));
 
 })();
